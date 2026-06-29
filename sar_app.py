@@ -209,7 +209,7 @@ if st.session_state["go_authenticated"]:
         if not active_records:
             st.info("No records currently initialized to update.")
         else:
-            edit_mapper = {f"CAB: {x['cab']} | Received: {x.get('date_of_receipt', 'Account Not received') Management}": x for x in active_records}
+           edit_mapper = {f"CAB: {x['cab']} | Received: {x.get('date_of_receipt', 'Account Not received')}": x for x in active_records}
             selected_edit_label = st.selectbox("Select Target Record to Modify:", list(edit_mapper.keys()))
             target_record = edit_mapper[selected_edit_label]
             
