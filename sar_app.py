@@ -97,6 +97,7 @@ else:
 def render_sar_html_table(all_records):
     """Compiles an alphabetized table for SAR tracking metrics with conditional visibility rules"""
     if not all_records:
+        st.info("No records found inside tracking partitions.")
         return
         
     sorted_sar = sorted(all_records, key=lambda x: x.get("cab", "").lower())
@@ -172,7 +173,7 @@ def render_sar_html_table(all_records):
 
 # --- TAB 1: MASTER DASHBOARD STREAM ---
 with go_tab_view:
-    st.subheader("📋 Status of SARs O/o DGA, CE (ESD)")
+    st.markdown("### 📋 Status of SARs O/o DGA, CE (ESD)")
     raw_sars = fetch_all_sars()
     render_sar_html_table(raw_sars)
 
