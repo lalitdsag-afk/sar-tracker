@@ -93,7 +93,6 @@ if st.session_state["go_authenticated"]:
         "✏️ Edit & Overwrite Pipeline Data"
     ])
 else:
-    # Public layout mapping logic
     go_tab_view = st.container()
     st.info("ℹ️ Viewing public read-only Master Dashboard stream. Administrative credentials required to update records.")
 
@@ -167,7 +166,6 @@ def render_sar_html_table(all_records):
 
 # --- TAB 1: MASTER DASHBOARD STREAM ---
 with go_tab_view:
-    # --- UPDATED HEADER INTERFACE ---
     st.subheader("📋 Status of SARs O/o DGA, CE (ESD)")
     raw_sars = fetch_all_sars()
     render_sar_html_table(raw_sars)
@@ -209,7 +207,8 @@ if st.session_state["go_authenticated"]:
         if not active_records:
             st.info("No records currently initialized to update.")
         else:
-           edit_mapper = {f"CAB: {x['cab']} | Received: {x.get('date_of_receipt', 'Account Not received')}": x for x in active_records}
+            # --- INDENTATION CHANNELS CORRECTED HERE ---
+            edit_mapper = {f"CAB: {x['cab']} | Received: {x.get('date_of_receipt', 'Account Not received')}": x for x in active_records}
             selected_edit_label = st.selectbox("Select Target Record to Modify:", list(edit_mapper.keys()))
             target_record = edit_mapper[selected_edit_label]
             
