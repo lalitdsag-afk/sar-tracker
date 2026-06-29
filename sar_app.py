@@ -82,17 +82,6 @@ else:
         st.session_state["go_user"] = None
         st.rerun()
 
-# --- MAIN RENDER LOGIC LAYER ---
-if st.session_state["go_authenticated"]:
-    go_tab_view, go_tab_create, go_tab_update = st.tabs([
-        "📊 Master Tracking Dashboard",
-        "📋 Add Fresh Autonomous Body (CAB)",
-        "✏️ Edit & Overwrite Pipeline Data"
-    ])
-else:
-    go_tab_view = st.container()
-    st.info("ℹ️ Viewing public read-only Master Dashboard stream. Administrative credentials required to update records.")
-
 # --- RAW HTML SAR RENDERER ENGINE ---
 def render_sar_html_table(all_records):
     """Compiles an alphabetized table for SAR tracking metrics with conditional visibility rules"""
@@ -171,8 +160,20 @@ def render_sar_html_table(all_records):
     """
     st.markdown(html_table, unsafe_allow_html=True)
 
-# --- TAB 1: MASTER DASHBOARD STREAM ---
-with go_tab_view:
+# --- MAIN RENDER LOGIC SWITCHBOARD ---
+if st.session_state["go_authenticated"]:
+    go_tab_view, go_tab_create, go_tab_update = st.tabs([
+        "📊 Master Tracking Dashboard",
+        "📋 Add Fresh Autonomous Body (CAB)",
+        "✏️ Edit & Overwrite Pipeline Data"
+    ])
+    
+    with go_tab_view:
+        st.markdown("### 📋 Status of SARs O/o DGA, CE (ESD)")
+        raw_sars = fetch_all_sars()
+        render_sar_html_table(raw_sars)
+else:
+    st.info("ℹ️ Viewing public read-only Master Dashboard stream. Administrative credentials required to update records.")
     st.markdown("### 📋 Status of SARs O/o DGA, CE (ESD)")
     raw_sars = fetch_all_sars()
     render_sar_html_table(raw_sars)
