@@ -56,7 +56,7 @@ CAB_OPTIONS = ["CSIR", "TDB", "RCB", "ANRF", "WII", "NTCA", "CAMPA", "CAQM", "CZ
 STATUS_OPTIONS = ["Accounts Not Received", "Field Audit in Progress", "Draft SAR sent to HQ", "SAR issued"]
 
 # --- APP LAYOUT ---
-st.set_page_config(page_title="SAR Tracking Management System", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="SAR Tracking Management System", layout="wide")
 
 st.title("🛡️ Separate Audit Report (SAR) Tracking Portal")
 st.markdown("##### **DGA, CE (ESD) — Standalone Monitoring Engine**")
@@ -86,16 +86,12 @@ else:
         st.session_state["go_authenticated"] = False
         st.session_state["go_user"] = None
         st.rerun()
-def fmt_dt(d_str):
-    """Converts YYYY-MM-DD to DD-MM-YY"""
-    if not d_str: return ""
-    try:
-        return datetime.strptime(d_str, "%Y-%m-%d").strftime("%d-%m-%y")
-    except:
-        return d_str
+
+# --- RAW HTML SAR RENDERER ENGINE ---
 def render_sar_html_table(all_records):
+    """Compiles an alphabetized clean HTML table for SAR tracking metrics without whitespace leaks"""
     if not all_records:
-        st.info("No records found.")
+        st.info("No records found inside tracking partitions.")
         return
         
     sorted_sar = sorted(all_records, key=lambda x: x.get("cab", "").lower())
@@ -105,47 +101,21 @@ def render_sar_html_table(all_records):
         receipt_dt_str = item.get("date_of_receipt")
         status_val = item.get("status", "Accounts Not Received")
         
-        # Calculate Dates
+        # Target Date calculations based on the Date of Receipt parameter
         if receipt_dt_str and status_val != "Accounts Not Received":
-            base_dt = datetime.strptime(receipt_dt_str, "%Y-%m-%d")
-            t_field = (base_dt + timedelta(days=60)).strftime("%d-%m-%y")
-            t_hq = (base_dt + timedelta(days=90)).strftime("%d-%m-%y")
-            t_issue = (base_dt + timedelta(days=120)).strftime("%d-%m-%y")
-            receipt_display = fmt_dt(receipt_dt_str)
+            try:
+                base_dt = datetime.strptime(receipt_dt_str, "%Y-%m-%d")
+                t_field = (base_dt + timedelta(days=60)).strftime("%Y-%m-%d")
+                t_hq = (base_dt + timedelta(days=90)).strftime("%Y-%m-%d")
+                t_issue = (base_dt + timedelta(days=120)).strftime("%Y-%m-%d")
+                receipt_display = receipt_dt_str
+            except:
+                t_field = t_hq = t_issue = "Date Error"
+                receipt_display = receipt_dt_str
         else:
             receipt_display = "Account Not received"
             t_field = t_hq = t_issue = ""
             status_val = "Accounts Not Received"
-            
-        act_field = fmt_dt(item.get("actual_date_field")) if item.get("actual_date_field") and status_val != "Accounts Not Received" else ""
-        act_hq = fmt_dt(item.get("actual_date_hq")) if item.get("actual_date_hq") and status_val in ["Draft SAR sent to HQ", "SAR issued"] else ""
-        act_issue = fmt_dt(item.get("actual_date_issue")) if item.get("actual_date_issue") and status_val == "SAR issued" else ""
-        
-        badge_color = "#e74c3c" if status_val == "Accounts Not Received" else ("#3498db" if status_val == "Field Audit in Progress" else ("#f39c12" if status_val == "Draft SAR sent to HQ" else "#2cc357"))
-        
-        html_rows.append(f"""
-        <tr style="border-bottom: 1px solid #e6e6e6; text-align: center;">
-            <td style="padding: 8px;">{idx}</td>
-            <td style="padding: 8px; font-weight: bold; color: #1f77b4;">{item['cab']}</td>
-            <td style="padding: 8px;">{receipt_display}</td>
-            <td style="padding: 8px; color: #d35400;">{t_field}</td>
-            <td style="padding: 8px;">{act_field}</td>
-            <td style="padding: 8px; color: #d35400;">{t_hq}</td>
-            <td style="padding: 8px;">{act_hq}</td>
-            <td style="padding: 8px; color: #d35400;">{t_issue}</td>
-            <td style="padding: 8px;">{act_issue}</td>
-            <td style="padding: 8px;"><span style="background-color: {badge_color}; color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px;">{status_val}</span></td>
-        </tr>""")
-        
-    full_html_table = f"""<div style="overflow-x: auto;">
-        <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: sans-serif; font-size: 13px;">
-            <thead style="background-color: #2c3e50; color: white;">
-                <tr><th style="padding: 10px;">S.No.</th><th>CAB</th><th>Date of Receipt</th><th>Target: Field</th><th>Actual: Field</th><th>Target: HQ</th><th>Actual: HQ</th><th>Target: Issue</th><th>Actual: Issue</th><th>Status</th></tr>
-            </thead>
-            <tbody>{"".join(html_rows)}</tbody>
-        </table>
-    </div>"""
-    st.components.v1.html(full_html_table, height=500, scrolling=True)
             
         # Determine cell output text content dynamically using your status gating laws
         act_field = item.get("actual_date_field") if item.get("actual_date_field") and status_val in ["Field Audit in Progress", "Draft SAR sent to HQ", "SAR issued"] else ""
