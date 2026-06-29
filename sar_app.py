@@ -52,6 +52,7 @@ def authenticate_go(uid, pwd):
 
 # --- CONFIGURATION ARRAYS ---
 CAB_OPTIONS = ["CSIR", "TDB", "RCB", "ANRF", "WII", "NTCA", "CAMPA", "CAQM", "CZA", "NBA", "SCTIMST"]
+STATUS_OPTIONS = ["Accounts Awaited", "Field Audit in Progress", "Sent to HQs", "IR Issued"]
 
 # --- APP LAYOUT ---
 st.set_page_config(page_title="SAR Tracking Management System", layout="wide")
@@ -107,8 +108,9 @@ def render_sar_html_table(all_records):
     html_rows = ""
     for idx, item in enumerate(sorted_sar, start=1):
         receipt_dt_str = item.get("date_of_receipt")
+        status_val = item.get("status", "Accounts Awaited")
         
-        if receipt_dt_str:
+        if receipt_dt_str and status_val != "Accounts Awaited":
             try:
                 base_dt = datetime.strptime(receipt_dt_str, "%Y-%m-%d")
                 t_field = (base_dt + timedelta(days=60)).strftime("%Y-%m-%d")
@@ -121,10 +123,14 @@ def render_sar_html_table(all_records):
         else:
             receipt_display = "Account Not received"
             t_field = t_hq = t_issue = "Pending Initialization"
+            status_val = "Accounts Awaited"
             
-        act_field = item.get("actual_date_field") if item.get("actual_date_field") else "Pending"
-        act_hq = item.get("actual_date_hq") if item.get("actual_date_hq") else "Pending"
-        act_issue = item.get("actual_date_issue") if item.get("actual_date_issue") else "Pending"
+        act_field = item.get("actual_date_field") if item.get("actual_date_field") and status_val != "Accounts Awaited" else "Pending"
+        act_hq = item.get("actual_date_hq") if item.get("actual_date_hq") and status_val != "Accounts Awaited" else "Pending"
+        act_issue = item.get("actual_date_issue") if item.get("actual_date_issue") and status_val != "Accounts Awaited" else "Pending"
+        
+        # Color codes style status tags
+        badge_color = "#e74c3c" if status_val == "Accounts Awaited" else ("#3498db" if status_val == "Field Audit in Progress" else ("#f39c12" if status_val == "Sent to HQs" else "#2cc357"))
         
         html_rows += f"""
         <tr style="border-bottom: 1px solid #e6e6e6;">
@@ -137,6 +143,7 @@ def render_sar_html_table(all_records):
             <td style="padding: 8px; text-align: left; font-weight: 500;">{act_hq}</td>
             <td style="padding: 8px; text-align: left; color: #d35400;">{t_issue}</td>
             <td style="padding: 8px; text-align: left; font-weight: 500;">{act_issue}</td>
+            <td style="padding: 8px; text-align: left;"><span style="background-color: {badge_color}; color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; white-space: nowrap;">{status_val}</span></td>
         </tr>
         """
         
@@ -154,6 +161,7 @@ def render_sar_html_table(all_records):
                     <th style="padding: 10px; text-align: left; font-weight: bold;">Actual Date: Draft to HQ</th>
                     <th style="padding: 10px; text-align: left; font-weight: bold;">Target Date: Issue of SAR</th>
                     <th style="padding: 10px; text-align: left; font-weight: bold;">Actual Date: Issue of SAR</th>
+                    <th style="padding: 10px; text-align: left; font-weight: bold;">Workflow Status</th>
                 </tr>
             </thead>
             <tbody>
@@ -177,20 +185,22 @@ if st.session_state["go_authenticated"]:
         st.subheader("📋 Initialize New Central Autonomous Body Tracker")
         with st.form("sar_create_form", clear_on_submit=True):
             new_cab = st.selectbox("Select Target CAB", CAB_OPTIONS)
+            status_flow = st.selectbox("Workflow Operational Status", STATUS_OPTIONS, index=0, key="new_status_flow")
             
-            receipt_mode = st.radio("Initial Account Status:", ["Account Not received", "Received"], index=0, key="new_receipt_mode")
-            if receipt_mode == "Received":
-                new_receipt_dt = st.date_input("Select Ingestion Date of Receipt", value=datetime.today().date())
-            else:
-                new_receipt_dt = None
+            # Form displays inputs dynamically based on user selections
+            new_receipt_dt = None
+            if status_flow != "Accounts Awaited":
+                new_receipt_dt = st.date_input("Date of Receipt of Account", value=datetime.today().date(), key="new_receipt_dt_input")
                 
             if st.form_submit_button("🚀 Add CAB to Master Log"):
+                final_status = "Accounts Awaited" if not new_receipt_dt else status_flow
                 create_payload = {
                     "cab": new_cab,
                     "date_of_receipt": str(new_receipt_dt) if new_receipt_dt else None,
                     "actual_date_field": None,
                     "actual_date_hq": None,
-                    "actual_date_issue": None
+                    "actual_date_issue": None,
+                    "status": final_status
                 }
                 res = insert_sar_record(create_payload)
                 if res.status_code in [200, 201]:
@@ -207,52 +217,75 @@ if st.session_state["go_authenticated"]:
         if not active_records:
             st.info("No records currently initialized to update.")
         else:
-            # --- INDENTATION CHANNELS CORRECTED HERE ---
-            edit_mapper = {f"CAB: {x['cab']} | Received: {x.get('date_of_receipt', 'Account Not received')}": x for x in active_records}
+            edit_mapper = {f"CAB: {x['cab']} | Current Status: {x.get('status', 'Accounts Awaited')}": x for x in active_records}
             selected_edit_label = st.selectbox("Select Target Record to Modify:", list(edit_mapper.keys()))
             target_record = edit_mapper[selected_edit_label]
+            
+            # Read metadata variables out of raw object payload fields safely
+            current_status = target_record.get("status", "Accounts Awaited")
+            saved_receipt_str = target_record.get("date_of_receipt")
             
             with st.form("sar_edit_form"):
                 st.markdown(f"Modifying Entry Parameters for: **{target_record['cab']}**")
                 
-                ec1, ec2 = st.columns(2)
-                with ec1:
-                    updated_cab = st.selectbox("CAB Assignment", CAB_OPTIONS, index=CAB_OPTIONS.index(target_record['cab']) if target_record['cab'] in CAB_OPTIONS else 0)
-                    edit_receipt_mode = st.radio("Current Account Status", ["Account Not received", "Received"], index=1 if target_record.get("date_of_receipt") else 0, key="edit_receipt_mode")
+                updated_cab = st.selectbox("CAB Assignment", CAB_OPTIONS, index=CAB_OPTIONS.index(target_record['cab']) if target_record['cab'] in CAB_OPTIONS else 0)
+                updated_status = st.selectbox("Update Workflow Operational Status", STATUS_OPTIONS, index=STATUS_OPTIONS.index(current_status) if current_status in STATUS_OPTIONS else 0)
+                
+                # Setup localized formatting functions
+                def parse_saved_date_or_none(key_name):
+                    if target_record.get(key_name):
+                        try: return datetime.strptime(target_record[key_name], "%Y-%m-%d").date()
+                        except: return None
+                    return None
+                
+                updated_receipt_dt = None
+                updated_field_dt = None
+                updated_hq_dt = None
+                updated_issue_dt = None
+                
+                # Render inputs conditionally based on active selections
+                if updated_status != "Accounts Awaited":
+                    st.markdown("---")
+                    st.markdown("##### 📅 Active Stage Timeline Milestones")
+                    ec1, ec2 = st.columns(2)
                     
-                    if edit_receipt_mode == "Received":
-                        saved_dt_str = target_record.get("date_of_receipt", datetime.today().strftime("%Y-%m-%d"))
-                        try: default_receipt_dt = datetime.strptime(saved_dt_str, "%Y-%m-%d").date()
-                        except: default_receipt_dt = datetime.today().date()
-                        updated_receipt_dt = st.date_input("Date of Receipt of Account", value=default_receipt_dt)
-                    else:
-                        updated_receipt_dt = None
+                    with ec1:
+                        try: r_init = datetime.strptime(saved_receipt_str, "%Y-%m-%d").date() if saved_receipt_str else datetime.today().date()
+                        except: r_init = datetime.today().date()
+                        updated_receipt_dt = st.date_input("Date of Receipt of Account", value=r_init)
                         
-                with ec2:
-                    def parse_saved_date_or_none(key_name):
-                        if target_record.get(key_name):
-                            try: return datetime.strptime(target_record[key_name], "%Y-%m-%d").date()
-                            except: return None
-                        return None
-                        
-                    v_field = parse_saved_date_or_none("actual_date_field")
-                    v_hq = parse_saved_date_or_none("actual_date_hq")
-                    v_issue = parse_saved_date_or_none("actual_date_issue")
-                    
-                    updated_field_dt = st.date_input("Actual Date of Completion of Field Audit", value=v_field if v_field else None)
-                    updated_hq_dt = st.date_input("Actual Date of Sending Draft SAR to HQ", value=v_hq if v_hq else None)
-                    updated_issue_dt = st.date_input("Actual Date of Issue of SAR", value=v_issue if v_issue else None)
-                    
+                        if updated_status in ["Field Audit in Progress", "Sent to HQs", "IR Issued"]:
+                            updated_field_dt = st.date_input("Actual Date of Completion of Field Audit", value=parse_saved_date_or_none("actual_date_field"))
+                            
+                    with ec2:
+                        if updated_status in ["Sent to HQs", "IR Issued"]:
+                            updated_hq_dt = st.date_input("Actual Date of Sending Draft SAR to HQ", value=parse_saved_date_or_none("actual_date_hq"))
+                        if updated_status == "IR Issued":
+                            updated_issue_dt = st.date_input("Actual Date of Issue of SAR", value=parse_saved_date_or_none("actual_date_issue"))
+                            
                 col_btn1, col_btn2 = st.columns([4, 1])
                 with col_btn1:
                     if st.form_submit_button("💾 Save Changes & Update Records"):
-                        update_payload = {
-                            "cab": updated_cab,
-                            "date_of_receipt": str(updated_receipt_dt) if updated_receipt_dt else None,
-                            "actual_date_field": str(updated_field_dt) if updated_field_dt else None,
-                            "actual_date_hq": str(updated_hq_dt) if updated_hq_dt else None,
-                            "actual_date_issue": str(updated_issue_dt) if updated_issue_dt else None
-                        }
+                        # If a record is reset to Accounts Awaited, clear all stored milestone dates automatically
+                        if updated_status == "Accounts Awaited":
+                            update_payload = {
+                                "cab": updated_cab,
+                                "date_of_receipt": None,
+                                "actual_date_field": None,
+                                "actual_date_hq": None,
+                                "actual_date_issue": None,
+                                "status": "Accounts Awaited"
+                            }
+                        else:
+                            update_payload = {
+                                "cab": updated_cab,
+                                "date_of_receipt": str(updated_receipt_dt) if updated_receipt_dt else None,
+                                "actual_date_field": str(updated_field_dt) if updated_field_dt else None,
+                                "actual_date_hq": str(updated_hq_dt) if updated_hq_dt else None,
+                                "actual_date_issue": str(updated_issue_dt) if updated_issue_dt else None,
+                                "status": updated_status
+                            }
+                            
                         update_sar_record(target_record["id"], update_payload)
                         st.success("Record parameters securely updated in cloud partition!")
                         st.rerun()
