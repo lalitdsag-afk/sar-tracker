@@ -40,6 +40,11 @@ def update_sar_record(record_id, payload):
     url = f"{SUPABASE_URL}/rest/v1/sar_trackers?id=eq.{record_id}"
     return requests.patch(url, headers={**HEADERS, "Content-Type": "application/json"}, json=payload)
 
+def delete_sar_record(record_id):
+    """Deletes an active tracking record cleanly via unique primary identifiers"""
+    url = f"{SUPABASE_URL}/rest/v1/sar_trackers?id=eq.{record_id}"
+    return requests.delete(url, headers=HEADERS)
+
 def authenticate_go(uid, pwd):
     """Authenticates the Group Officer against your centralized user directory matrix"""
     url = f"{SUPABASE_URL}/rest/v1/users?username=eq.{uid}&password=eq.{pwd}&role=eq.Group Officer (GO)"
@@ -82,7 +87,7 @@ else:
         st.session_state["go_user"] = None
         st.rerun()
 
-# --- RAW HTML SAR RENDERER ENGINE (STABILIZED) ---
+# --- RAW HTML SAR RENDERER ENGINE ---
 def render_sar_html_table(all_records):
     """Compiles an alphabetized clean HTML table for SAR tracking metrics without whitespace leaks"""
     if not all_records:
@@ -136,7 +141,6 @@ def render_sar_html_table(all_records):
         
     combined_rows = "".join(html_rows)
     
-    # Secure parent wrapper encapsulation shell logic block
     full_html_table = f"""<div style="overflow-x: auto; width: 100%; margin-top: 10px;">
         <table style="width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 13px; color: #333;">
             <thead>
@@ -162,6 +166,8 @@ def render_sar_html_table(all_records):
     st.components.v1.html(full_html_table, height=500, scrolling=True)
 
 # --- MAIN RENDER LOGIC SWITCHBOARD ---
+raw_sars = fetch_all_sars()
+
 if st.session_state["go_authenticated"]:
     go_tab_view, go_tab_create, go_tab_update = st.tabs([
         "📊 Master Tracking Dashboard",
@@ -171,60 +177,66 @@ if st.session_state["go_authenticated"]:
     
     with go_tab_view:
         st.markdown("### 📋 Status of SARs O/o DGA, CE (ESD)")
-        raw_sars = fetch_all_sars()
         render_sar_html_table(raw_sars)
 else:
     st.info("ℹ️ Viewing public read-only Master Dashboard stream. Administrative credentials required to update records.")
     st.markdown("### 📋 Status of SARs O/o DGA, CE (ESD)")
-    raw_sars = fetch_all_sars()
     render_sar_html_table(raw_sars)
 
 # --- GO ONLY RESTRICTED EDITING SECTIONS ---
 if st.session_state["go_authenticated"]:
-    # --- TAB 2: INSERT NEW AUTONOMOUS BODY RECORDS ---
+    # --- TAB 2: INSERT NEW AUTONOMOUS BODY RECORDS (WITH ONE-ENTRY DUP GUARDRAIL) ---
     with go_tab_create:
         st.subheader("📋 Initialize New Central Autonomous Body Tracker")
+        
+        # Build index mapping list of existing CAB entries in the database
+        existing_cabs = [item["cab"].strip().upper() for item in raw_sars if "cab" in item]
+        
         with st.form("sar_create_form", clear_on_submit=True):
             new_cab = st.selectbox("Select Target CAB", CAB_OPTIONS)
             status_flow = st.selectbox("Select Workflow Status Trigger", STATUS_OPTIONS, index=0)
             
-            # Form displays inputs dynamically based on user selections
             new_receipt_dt = None
             if status_flow != "Accounts Not Received":
                 new_receipt_dt = st.date_input("Date of Receipt of Account", value=datetime.today().date())
                 
             if st.form_submit_button("🚀 Add CAB to Master Log"):
-                final_status = "Accounts Not Received" if not new_receipt_dt else status_flow
-                create_payload = {
-                    "cab": new_cab,
-                    "date_of_receipt": str(new_receipt_dt) if new_receipt_dt else None,
-                    "actual_date_field": None,
-                    "actual_date_hq": None,
-                    "actual_date_issue": None,
-                    "status": final_status
-                }
-                res = insert_sar_record(create_payload)
-                if res.status_code in [200, 201]:
-                    st.success(f"Successfully initialized standalone SAR matrix for {new_cab}!")
-                    st.rerun()
+                # Enforce unique constraint lookup step
+                if new_cab.strip().upper() in existing_cabs:
+                    st.error(f"❌ **Duplicate Entry Blocked!** A tracker for **{new_cab}** already exists. Please navigate to the 'Edit & Overwrite Data' tab to modify this record.")
                 else:
-                    st.error("Database connection fault encountered writing payload.")
+                    final_status = "Accounts Not Received" if not new_receipt_dt else status_flow
+                    create_payload = {
+                        "cab": new_cab,
+                        "date_of_receipt": str(new_receipt_dt) if new_receipt_dt else None,
+                        "actual_date_field": None,
+                        "actual_date_hq": None,
+                        "actual_date_issue": None,
+                        "status": final_status
+                    }
+                    res = insert_sar_record(create_payload)
+                    if res.status_code in [200, 201]:
+                        st.success(f"Successfully initialized standalone SAR matrix for {new_cab}!")
+                        st.rerun()
+                    else:
+                        st.error("Database connection fault encountered writing payload.")
 
-    # --- TAB 3: UPDATE OR OVERWRITE EXISTING ENTRIES ---
+    # --- TAB 3: UPDATE OR OVERWRITE EXISTING ENTRIES (WITH DELETION INTEGRATED) ---
     with go_tab_update:
         st.subheader("✏️ Administrative Overwrite & Modification Deck")
-        active_records = fetch_all_sars()
         
-        if not active_records:
+        if not raw_sars:
             st.info("No records currently initialized to update.")
         else:
-            edit_mapper = {f"CAB: {x['cab']} | Status: {x.get('status', 'Accounts Not Received')}": x for x in active_records}
-            selected_edit_label = st.selectbox("Select Target Record to Modify:", list(edit_mapper.keys()))
+            # Format and select entries
+            edit_mapper = {f"CAB: {x['cab']} | Status: {x.get('status', 'Accounts Not Received')}": x for x in raw_sars}
+            selected_edit_label = st.selectbox("Select Target Record to Manage:", list(edit_mapper.keys()))
             target_record = edit_mapper[selected_edit_label]
             
             current_status = target_record.get("status", "Accounts Not Received")
             saved_receipt_str = target_record.get("date_of_receipt")
             
+            # Form wrapper block for data edits
             with st.form("sar_edit_form"):
                 st.markdown(f"Modifying Entry Parameters for: **{target_record['cab']}**")
                 
@@ -242,7 +254,6 @@ if st.session_state["go_authenticated"]:
                 updated_hq_dt = None
                 updated_issue_dt = None
                 
-                # Render parameters conditionally as defined by the explicit state status dependencies
                 if updated_status != "Accounts Not Received":
                     st.markdown("---")
                     st.markdown("##### 📅 Active Stage Timeline Milestones")
@@ -262,31 +273,37 @@ if st.session_state["go_authenticated"]:
                         if updated_status == "SAR issued":
                             updated_issue_dt = st.date_input("Actual Date of Issue of SAR", value=parse_saved_date_or_none("actual_date_issue"))
                             
-                col_btn1, col_btn2 = st.columns([4, 1])
-                with col_btn1:
-                    if st.form_submit_button("💾 Save Changes & Update Records"):
-                        if updated_status == "Accounts Not Received":
-                            update_payload = {
-                                "cab": updated_cab,
-                                "date_of_receipt": None,
-                                "actual_date_field": None,
-                                "actual_date_hq": None,
-                                "actual_date_issue": None,
-                                "status": "Accounts Not Received"
-                            }
-                        else:
-                            update_payload = {
-                                "cab": updated_cab,
-                                "date_of_receipt": str(updated_receipt_dt) if updated_receipt_dt else None,
-                                "actual_date_field": str(updated_field_dt) if updated_field_dt else None,
-                                "actual_date_hq": str(updated_hq_dt) if updated_hq_dt else None,
-                                "actual_date_issue": str(updated_issue_dt) if updated_issue_dt else None,
-                                "status": updated_status
-                            }
-                            
-                        update_sar_record(target_record["id"], update_payload)
-                        st.success("Record parameters securely updated in cloud partition!")
-                        st.rerun()
+                if st.form_submit_button("💾 Save Changes & Update Records"):
+                    if updated_status == "Accounts Not Received":
+                        update_payload = {
+                            "cab": updated_cab,
+                            "date_of_receipt": None,
+                            "actual_date_field": None,
+                            "actual_date_hq": None,
+                            "actual_date_issue": None,
+                            "status": "Accounts Not Received"
+                        }
+                    else:
+                        update_payload = {
+                            "cab": updated_cab,
+                            "date_of_receipt": str(updated_receipt_dt) if updated_receipt_dt else None,
+                            "actual_date_field": str(updated_field_dt) if updated_field_dt else None,
+                            "actual_date_hq": str(updated_hq_dt) if updated_hq_dt else None,
+                            "actual_date_issue": str(updated_issue_dt) if updated_issue_dt else None,
+                            "status": updated_status
+                        }
                         
-                with col_btn2:
-                    st.write("")
+                    update_sar_record(target_record["id"], update_payload)
+                    st.success("Record parameters securely updated in cloud partition!")
+                    st.rerun()
+
+            # --- DEDICATED DELETE CONTROL OUTSIDE MANAGE EDIT FORM BLOCK ---
+            st.markdown("---")
+            st.markdown("##### ⚠️ Administrative Danger Zone")
+            if st.button(f"🗑️ Delete Tracking Data for {target_record['cab']} Permanent", help="This operation cannot be undone. It removes the line entry entirely from the Master Board."):
+                del_res = delete_sar_record(target_record["id"])
+                if del_res.status_code in [200, 204]:
+                    st.warning(f"Successfully dropped record parameters for {target_record['cab']}.")
+                    st.rerun()
+                else:
+                    st.error("Database connection fault encountered trying to execute drop sequence.")
