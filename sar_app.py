@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 from datetime import datetime, timedelta
 import os
+import json
 
 # --- SECURE CLOUD CONFIGURATION ---
 try:
@@ -19,10 +20,17 @@ HEADERS = {
 
 # --- DATABASE ENGINE FUNCTIONS ---
 def fetch_all_sars():
-    """Queries the dedicated SAR database partition table"""
-    url = f"{SUPABASE_URL}/rest/v1/sar_trackers"
-    response = requests.get(url, headers={**HEADERS, "Content-Type": "application/json"})
-    return response.json() if response.status_code == 200 else []
+    """Queries the dedicated SAR database partition table securely with connection safeguards"""
+    try:
+        url = f"{SUPABASE_URL}/rest/v1/sar_trackers"
+        response = requests.get(url, headers={**HEADERS, "Content-Type": "application/json"}, timeout=10)
+        return response.json() if response.status_code == 200 else []
+    except requests.exceptions.ConnectionError:
+        st.error("📡 **Database Connection Timeout!** The app couldn't reach your Supabase server. Please verify your `SUPABASE_URL` in secrets or check if your Supabase project is paused.")
+        return []
+    except Exception as e:
+        print(f"General fetch fault log: {e}")
+        return []
 
 def insert_sar_record(payload):
     url = f"{SUPABASE_URL}/rest/v1/sar_trackers"
@@ -89,76 +97,80 @@ else:
     go_tab_view = st.container()
     st.info("ℹ️ Viewing public read-only Master Dashboard stream. Administrative credentials required to update records.")
 
-# --- TAB 1: MASTER DASHBOARD STREAM (VISIBLE TO EVERYONE WITH THE LINK) ---
-with go_tab_view:
-    st.subheader("📋 Active Separate Audit Report (SAR) Master Log")
-    raw_sars = fetch_all_sars()
-    
-    if not raw_sars:
-        st.info("🎉 No Pending ATNs")
-    else:
-        # Case-insensitive alphabetical sorting execution by CAB name structure
-        sorted_sar = sorted(raw_sars, key=lambda x: x.get("cab", "").lower())
+# --- RAW HTML SAR RENDERER ENGINE ---
+def render_sar_html_table(all_records):
+    """Compiles a case-insensitive alphabetized table for SAR tracking metrics without hover copy tags"""
+    if not all_records:
+        return
         
-        html_rows = ""
-        for idx, item in enumerate(sorted_sar, start=1):
-            receipt_dt_str = item.get("date_of_receipt")
+    sorted_sar = sorted(all_records, key=lambda x: x.get("cab", "").lower())
+    
+    html_rows = ""
+    for idx, item in enumerate(sorted_sar, start=1):
+        receipt_dt_str = item.get("date_of_receipt")
+        
+        if receipt_dt_str:
+            try:
+                base_dt = datetime.strptime(receipt_dt_str, "%Y-%m-%d")
+                t_field = (base_dt + timedelta(days=60)).strftime("%Y-%m-%d")
+                t_hq = (base_dt + timedelta(days=90)).strftime("%Y-%m-%d")
+                t_issue = (base_dt + timedelta(days=120)).strftime("%Y-%m-%d")
+                receipt_display = receipt_dt_str
+            except:
+                t_field = t_hq = t_issue = "Date Error"
+                receipt_display = receipt_dt_str
+        else:
+            receipt_display = "Account Not received"
+            t_field = t_hq = t_issue = "Pending Initialization"
             
-            if receipt_dt_str:
-                try:
-                    base_dt = datetime.strptime(receipt_dt_str, "%Y-%m-%d")
-                    t_field = (base_dt + timedelta(days=60)).strftime("%Y-%m-%d")
-                    t_hq = (base_dt + timedelta(days=90)).strftime("%Y-%m-%d")
-                    t_issue = (base_dt + timedelta(days=120)).strftime("%Y-%m-%d")
-                    receipt_display = receipt_dt_str
-                except:
-                    t_field = t_hq = t_issue = "Date Error"
-                    receipt_display = receipt_dt_str
-            else:
-                receipt_display = "Account Not received"
-                t_field = t_hq = t_issue = "Pending Initialization"
-                
-            act_field = item.get("actual_date_field") if item.get("actual_date_field") else "Pending"
-            act_hq = item.get("actual_date_hq") if item.get("actual_date_hq") else "Pending"
-            act_issue = item.get("actual_date_issue") if item.get("actual_date_issue") else "Pending"
-            
-            html_rows += f"""
-            <tr style="border-bottom: 1px solid #e6e6e6;">
-                <td style="padding: 8px; text-align: left;">{idx}</td>
-                <td style="padding: 8px; text-align: left; font-weight: bold; color: #1f77b4;">{item['cab']}</td>
-                <td style="padding: 8px; text-align: left; background-color: #fdfefe;">{receipt_display}</td>
-                <td style="padding: 8px; text-align: left; color: #d35400;">{t_field}</td>
-                <td style="padding: 8px; text-align: left; font-weight: 500;">{act_field}</td>
-                <td style="padding: 8px; text-align: left; color: #d35400;">{t_hq}</td>
-                <td style="padding: 8px; text-align: left; font-weight: 500;">{act_hq}</td>
-                <td style="padding: 8px; text-align: left; color: #d35400;">{t_issue}</td>
-                <td style="padding: 8px; text-align: left; font-weight: 500;">{act_issue}</td>
-            </tr>
-            """
-            
-        html_table = f"""
-        <div style="overflow-x: auto; width: 100%; margin-top: 10px;">
-            <table style="width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 13px; color: #333;">
-                <thead>
-                    <tr style="background-color: #2c3e50; color: white; border-bottom: 2px solid #34495e;">
-                        <th style="padding: 10px; text-align: left; font-weight: bold;">S.No.</th>
-                        <th style="padding: 10px; text-align: left; font-weight: bold;">CAB</th>
-                        <th style="padding: 10px; text-align: left; font-weight: bold;">Date of Receipt of Account</th>
-                        <th style="padding: 10px; text-align: left; font-weight: bold;">Target Date: Field Audit</th>
-                        <th style="padding: 10px; text-align: left; font-weight: bold;">Actual Date: Field Audit</th>
-                        <th style="padding: 10px; text-align: left; font-weight: bold;">Target Date: Draft to HQ</th>
-                        <th style="padding: 10px; text-align: left; font-weight: bold;">Actual Date: Draft to HQ</th>
-                        <th style="padding: 10px; text-align: left; font-weight: bold;">Target Date: Issue of SAR</th>
-                        <th style="padding: 10px; text-align: left; font-weight: bold;">Actual Date: Issue of SAR</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {html_rows}
-                </tbody>
-            </table>
-        </div>
+        act_field = item.get("actual_date_field") if item.get("actual_date_field") else "Pending"
+        act_hq = item.get("actual_date_hq") if item.get("actual_date_hq") else "Pending"
+        act_issue = item.get("actual_date_issue") if item.get("actual_date_issue") else "Pending"
+        
+        html_rows += f"""
+        <tr style="border-bottom: 1px solid #e6e6e6;">
+            <td style="padding: 8px; text-align: left;">{idx}</td>
+            <td style="padding: 8px; text-align: left; font-weight: bold; color: #1f77b4;">{item['cab']}</td>
+            <td style="padding: 8px; text-align: left; background-color: #fdfefe;">{receipt_display}</td>
+            <td style="padding: 8px; text-align: left; color: #d35400;">{t_field}</td>
+            <td style="padding: 8px; text-align: left; font-weight: 500;">{act_field}</td>
+            <td style="padding: 8px; text-align: left; color: #d35400;">{t_hq}</td>
+            <td style="padding: 8px; text-align: left; font-weight: 500;">{act_hq}</td>
+            <td style="padding: 8px; text-align: left; color: #d35400;">{t_issue}</td>
+            <td style="padding: 8px; text-align: left; font-weight: 500;">{act_issue}</td>
+        </tr>
         """
-        st.markdown(html_table, unsafe_allow_html=True)
+        
+    html_table = f"""
+    <div style="overflow-x: auto; width: 100%; margin-top: 10px;">
+        <table style="width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 13px; color: #333;">
+            <thead>
+                <tr style="background-color: #2c3e50; color: white; border-bottom: 2px solid #34495e;">
+                    <th style="padding: 10px; text-align: left; font-weight: bold;">S.No.</th>
+                    <th style="padding: 10px; text-align: left; font-weight: bold;">CAB</th>
+                    <th style="padding: 10px; text-align: left; font-weight: bold;">Date of Receipt of Account</th>
+                    <th style="padding: 10px; text-align: left; font-weight: bold;">Target Date: Field Audit</th>
+                    <th style="padding: 10px; text-align: left; font-weight: bold;">Actual Date: Field Audit</th>
+                    <th style="padding: 10px; text-align: left; font-weight: bold;">Target Date: Draft to HQ</th>
+                    <th style="padding: 10px; text-align: left; font-weight: bold;">Actual Date: Draft to HQ</th>
+                    <th style="padding: 10px; text-align: left; font-weight: bold;">Target Date: Issue of SAR</th>
+                    <th style="padding: 10px; text-align: left; font-weight: bold;">Actual Date: Issue of SAR</th>
+                </tr>
+            </thead>
+            <tbody>
+                {html_rows}
+            </tbody>
+        </table>
+    </div>
+    """
+    st.markdown(html_table, unsafe_allow_html=True)
+
+# --- TAB 1: MASTER DASHBOARD STREAM ---
+with go_tab_view:
+    # --- UPDATED HEADER INTERFACE ---
+    st.subheader("📋 Status of SARs O/o DGA, CE (ESD)")
+    raw_sars = fetch_all_sars()
+    render_sar_html_table(raw_sars)
 
 # --- GO ONLY RESTRICTED EDITING SECTIONS ---
 if st.session_state["go_authenticated"]:
@@ -197,8 +209,7 @@ if st.session_state["go_authenticated"]:
         if not active_records:
             st.info("No records currently initialized to update.")
         else:
-            # Map out labels
-            edit_mapper = {f"S.No. {i} | CAB: {x['cab']} | Received: {x.get('date_of_receipt', 'Account Not received')}": x for i, x in enumerate(active_records, start=1)}
+            edit_mapper = {f"CAB: {x['cab']} | Received: {x.get('date_of_receipt', 'Account Not received') Management}": x for x in active_records}
             selected_edit_label = st.selectbox("Select Target Record to Modify:", list(edit_mapper.keys()))
             target_record = edit_mapper[selected_edit_label]
             
@@ -208,9 +219,6 @@ if st.session_state["go_authenticated"]:
                 ec1, ec2 = st.columns(2)
                 with ec1:
                     updated_cab = st.selectbox("CAB Assignment", CAB_OPTIONS, index=CAB_OPTIONS.index(target_record['cab']) if target_record['cab'] in CAB_OPTIONS else 0)
-                    
-                    # Core Receipt Status Handling Logic block
-                    has_dt = target_record.get("date_of_receipt") is not null
                     edit_receipt_mode = st.radio("Current Account Status", ["Account Not received", "Received"], index=1 if target_record.get("date_of_receipt") else 0, key="edit_receipt_mode")
                     
                     if edit_receipt_mode == "Received":
@@ -251,4 +259,4 @@ if st.session_state["go_authenticated"]:
                         st.rerun()
                         
                 with col_btn2:
-                    st.write("") # Spacer alignment
+                    st.write("")
