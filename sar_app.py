@@ -82,21 +82,21 @@ else:
         st.session_state["go_user"] = None
         st.rerun()
 
-# --- RAW HTML SAR RENDERER ENGINE ---
+# --- RAW HTML SAR RENDERER ENGINE (STABILIZED) ---
 def render_sar_html_table(all_records):
-    """Compiles an alphabetized table for SAR tracking metrics with conditional visibility rules"""
+    """Compiles an alphabetized clean HTML table for SAR tracking metrics without whitespace leaks"""
     if not all_records:
         st.info("No records found inside tracking partitions.")
         return
         
     sorted_sar = sorted(all_records, key=lambda x: x.get("cab", "").lower())
     
-    html_rows = ""
+    html_rows = []
     for idx, item in enumerate(sorted_sar, start=1):
         receipt_dt_str = item.get("date_of_receipt")
         status_val = item.get("status", "Accounts Not Received")
         
-        # Determine calculations based on dynamic input presence states
+        # Target Date calculations based on the Date of Receipt parameter
         if receipt_dt_str and status_val != "Accounts Not Received":
             try:
                 base_dt = datetime.strptime(receipt_dt_str, "%Y-%m-%d")
@@ -112,16 +112,15 @@ def render_sar_html_table(all_records):
             t_field = t_hq = t_issue = ""
             status_val = "Accounts Not Received"
             
-        # Clear out column content conditionally based on structural workflow statuses
+        # Determine cell output text content dynamically using your status gating laws
         act_field = item.get("actual_date_field") if item.get("actual_date_field") and status_val in ["Field Audit in Progress", "Draft SAR sent to HQ", "SAR issued"] else ""
         act_hq = item.get("actual_date_hq") if item.get("actual_date_hq") and status_val in ["Draft SAR sent to HQ", "SAR issued"] else ""
         act_issue = item.get("actual_date_issue") if item.get("actual_date_issue") and status_val == "SAR issued" else ""
         
-        # Color codes style status tags
+        # Workflow status colors configuration layout mapping
         badge_color = "#e74c3c" if status_val == "Accounts Not Received" else ("#3498db" if status_val == "Field Audit in Progress" else ("#f39c12" if status_val == "Draft SAR sent to HQ" else "#2cc357"))
         
-        html_rows += f"""
-        <tr style="border-bottom: 1px solid #e6e6e6;">
+        row_string = f"""<tr style="border-bottom: 1px solid #e6e6e6;">
             <td style="padding: 8px; text-align: left;">{idx}</td>
             <td style="padding: 8px; text-align: left; font-weight: bold; color: #1f77b4;">{item['cab']}</td>
             <td style="padding: 8px; text-align: left;">{receipt_display}</td>
@@ -132,11 +131,13 @@ def render_sar_html_table(all_records):
             <td style="padding: 8px; text-align: left; color: #d35400;">{t_issue}</td>
             <td style="padding: 8px; text-align: left; font-weight: 500;">{act_issue}</td>
             <td style="padding: 8px; text-align: left;"><span style="background-color: {badge_color}; color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; white-space: nowrap;">{status_val}</span></td>
-        </tr>
-        """
+        </tr>"""
+        html_rows.append(row_string)
         
-    html_table = f"""
-    <div style="overflow-x: auto; width: 100%; margin-top: 10px;">
+    combined_rows = "".join(html_rows)
+    
+    # Secure parent wrapper encapsulation shell logic block
+    full_html_table = f"""<div style="overflow-x: auto; width: 100%; margin-top: 10px;">
         <table style="width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 13px; color: #333;">
             <thead>
                 <tr style="background-color: #2c3e50; color: white; border-bottom: 2px solid #34495e;">
@@ -153,12 +154,12 @@ def render_sar_html_table(all_records):
                 </tr>
             </thead>
             <tbody>
-                {html_rows}
+                {combined_rows}
             </tbody>
         </table>
-    </div>
-    """
-    st.markdown(html_table, unsafe_allow_html=True)
+    </div>"""
+    
+    st.components.v1.html(full_html_table, height=500, scrolling=True)
 
 # --- MAIN RENDER LOGIC SWITCHBOARD ---
 if st.session_state["go_authenticated"]:
