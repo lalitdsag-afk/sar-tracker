@@ -26,7 +26,7 @@ def fetch_all_sars():
         response = requests.get(url, headers={**HEADERS, "Content-Type": "application/json"}, timeout=10)
         return response.json() if response.status_code == 200 else []
     except requests.exceptions.ConnectionError:
-        st.error("📡 **Database Connection Timeout!** The app couldn't reach your Supabase server. Please verify your `SUPABASE_URL` in secrets or check if your Supabase project is paused.")
+        st.error("📡 **Database Connection Timeout!** Please check if your Supabase project is paused or your secrets configurations are invalid.")
         return []
     except Exception as e:
         print(f"General fetch fault log: {e}")
@@ -40,10 +40,6 @@ def update_sar_record(record_id, payload):
     url = f"{SUPABASE_URL}/rest/v1/sar_trackers?id=eq.{record_id}"
     return requests.patch(url, headers={**HEADERS, "Content-Type": "application/json"}, json=payload)
 
-def delete_sar_record(record_id):
-    url = f"{SUPABASE_URL}/rest/v1/sar_trackers?id=eq.{record_id}"
-    return requests.delete(url, headers=HEADERS)
-
 def authenticate_go(uid, pwd):
     """Authenticates the Group Officer against your centralized user directory matrix"""
     url = f"{SUPABASE_URL}/rest/v1/users?username=eq.{uid}&password=eq.{pwd}&role=eq.Group Officer (GO)"
@@ -52,7 +48,7 @@ def authenticate_go(uid, pwd):
 
 # --- CONFIGURATION ARRAYS ---
 CAB_OPTIONS = ["CSIR", "TDB", "RCB", "ANRF", "WII", "NTCA", "CAMPA", "CAQM", "CZA", "NBA", "SCTIMST"]
-STATUS_OPTIONS = ["Accounts Awaited", "Field Audit in Progress", "Sent to HQs", "IR Issued"]
+STATUS_OPTIONS = ["Accounts Not Received", "Field Audit in Progress", "Draft SAR sent to HQ", "SAR issued"]
 
 # --- APP LAYOUT ---
 st.set_page_config(page_title="SAR Tracking Management System", layout="wide")
@@ -86,7 +82,7 @@ else:
         st.session_state["go_user"] = None
         st.rerun()
 
-# --- MAIN RENDER LOGIC ---
+# --- MAIN RENDER LOGIC LAYER ---
 if st.session_state["go_authenticated"]:
     go_tab_view, go_tab_create, go_tab_update = st.tabs([
         "📊 Master Tracking Dashboard",
@@ -99,7 +95,7 @@ else:
 
 # --- RAW HTML SAR RENDERER ENGINE ---
 def render_sar_html_table(all_records):
-    """Compiles a case-insensitive alphabetized table for SAR tracking metrics without hover copy tags"""
+    """Compiles an alphabetized table for SAR tracking metrics with conditional visibility rules"""
     if not all_records:
         return
         
@@ -108,9 +104,10 @@ def render_sar_html_table(all_records):
     html_rows = ""
     for idx, item in enumerate(sorted_sar, start=1):
         receipt_dt_str = item.get("date_of_receipt")
-        status_val = item.get("status", "Accounts Awaited")
+        status_val = item.get("status", "Accounts Not Received")
         
-        if receipt_dt_str and status_val != "Accounts Awaited":
+        # Determine calculations based on dynamic input presence states
+        if receipt_dt_str and status_val != "Accounts Not Received":
             try:
                 base_dt = datetime.strptime(receipt_dt_str, "%Y-%m-%d")
                 t_field = (base_dt + timedelta(days=60)).strftime("%Y-%m-%d")
@@ -122,21 +119,22 @@ def render_sar_html_table(all_records):
                 receipt_display = receipt_dt_str
         else:
             receipt_display = "Account Not received"
-            t_field = t_hq = t_issue = "Pending Initialization"
-            status_val = "Accounts Awaited"
+            t_field = t_hq = t_issue = ""
+            status_val = "Accounts Not Received"
             
-        act_field = item.get("actual_date_field") if item.get("actual_date_field") and status_val != "Accounts Awaited" else "Pending"
-        act_hq = item.get("actual_date_hq") if item.get("actual_date_hq") and status_val != "Accounts Awaited" else "Pending"
-        act_issue = item.get("actual_date_issue") if item.get("actual_date_issue") and status_val != "Accounts Awaited" else "Pending"
+        # Clear out column content conditionally based on structural workflow statuses
+        act_field = item.get("actual_date_field") if item.get("actual_date_field") and status_val in ["Field Audit in Progress", "Draft SAR sent to HQ", "SAR issued"] else ""
+        act_hq = item.get("actual_date_hq") if item.get("actual_date_hq") and status_val in ["Draft SAR sent to HQ", "SAR issued"] else ""
+        act_issue = item.get("actual_date_issue") if item.get("actual_date_issue") and status_val == "SAR issued" else ""
         
         # Color codes style status tags
-        badge_color = "#e74c3c" if status_val == "Accounts Awaited" else ("#3498db" if status_val == "Field Audit in Progress" else ("#f39c12" if status_val == "Sent to HQs" else "#2cc357"))
+        badge_color = "#e74c3c" if status_val == "Accounts Not Received" else ("#3498db" if status_val == "Field Audit in Progress" else ("#f39c12" if status_val == "Draft SAR sent to HQ" else "#2cc357"))
         
         html_rows += f"""
         <tr style="border-bottom: 1px solid #e6e6e6;">
             <td style="padding: 8px; text-align: left;">{idx}</td>
             <td style="padding: 8px; text-align: left; font-weight: bold; color: #1f77b4;">{item['cab']}</td>
-            <td style="padding: 8px; text-align: left; background-color: #fdfefe;">{receipt_display}</td>
+            <td style="padding: 8px; text-align: left;">{receipt_display}</td>
             <td style="padding: 8px; text-align: left; color: #d35400;">{t_field}</td>
             <td style="padding: 8px; text-align: left; font-weight: 500;">{act_field}</td>
             <td style="padding: 8px; text-align: left; color: #d35400;">{t_hq}</td>
@@ -185,15 +183,15 @@ if st.session_state["go_authenticated"]:
         st.subheader("📋 Initialize New Central Autonomous Body Tracker")
         with st.form("sar_create_form", clear_on_submit=True):
             new_cab = st.selectbox("Select Target CAB", CAB_OPTIONS)
-            status_flow = st.selectbox("Workflow Operational Status", STATUS_OPTIONS, index=0, key="new_status_flow")
+            status_flow = st.selectbox("Select Workflow Status Trigger", STATUS_OPTIONS, index=0)
             
             # Form displays inputs dynamically based on user selections
             new_receipt_dt = None
-            if status_flow != "Accounts Awaited":
-                new_receipt_dt = st.date_input("Date of Receipt of Account", value=datetime.today().date(), key="new_receipt_dt_input")
+            if status_flow != "Accounts Not Received":
+                new_receipt_dt = st.date_input("Date of Receipt of Account", value=datetime.today().date())
                 
             if st.form_submit_button("🚀 Add CAB to Master Log"):
-                final_status = "Accounts Awaited" if not new_receipt_dt else status_flow
+                final_status = "Accounts Not Received" if not new_receipt_dt else status_flow
                 create_payload = {
                     "cab": new_cab,
                     "date_of_receipt": str(new_receipt_dt) if new_receipt_dt else None,
@@ -217,12 +215,11 @@ if st.session_state["go_authenticated"]:
         if not active_records:
             st.info("No records currently initialized to update.")
         else:
-            edit_mapper = {f"CAB: {x['cab']} | Current Status: {x.get('status', 'Accounts Awaited')}": x for x in active_records}
+            edit_mapper = {f"CAB: {x['cab']} | Status: {x.get('status', 'Accounts Not Received')}": x for x in active_records}
             selected_edit_label = st.selectbox("Select Target Record to Modify:", list(edit_mapper.keys()))
             target_record = edit_mapper[selected_edit_label]
             
-            # Read metadata variables out of raw object payload fields safely
-            current_status = target_record.get("status", "Accounts Awaited")
+            current_status = target_record.get("status", "Accounts Not Received")
             saved_receipt_str = target_record.get("date_of_receipt")
             
             with st.form("sar_edit_form"):
@@ -231,7 +228,6 @@ if st.session_state["go_authenticated"]:
                 updated_cab = st.selectbox("CAB Assignment", CAB_OPTIONS, index=CAB_OPTIONS.index(target_record['cab']) if target_record['cab'] in CAB_OPTIONS else 0)
                 updated_status = st.selectbox("Update Workflow Operational Status", STATUS_OPTIONS, index=STATUS_OPTIONS.index(current_status) if current_status in STATUS_OPTIONS else 0)
                 
-                # Setup localized formatting functions
                 def parse_saved_date_or_none(key_name):
                     if target_record.get(key_name):
                         try: return datetime.strptime(target_record[key_name], "%Y-%m-%d").date()
@@ -243,8 +239,8 @@ if st.session_state["go_authenticated"]:
                 updated_hq_dt = None
                 updated_issue_dt = None
                 
-                # Render inputs conditionally based on active selections
-                if updated_status != "Accounts Awaited":
+                # Render parameters conditionally as defined by the explicit state status dependencies
+                if updated_status != "Accounts Not Received":
                     st.markdown("---")
                     st.markdown("##### 📅 Active Stage Timeline Milestones")
                     ec1, ec2 = st.columns(2)
@@ -254,27 +250,26 @@ if st.session_state["go_authenticated"]:
                         except: r_init = datetime.today().date()
                         updated_receipt_dt = st.date_input("Date of Receipt of Account", value=r_init)
                         
-                        if updated_status in ["Field Audit in Progress", "Sent to HQs", "IR Issued"]:
+                        if updated_status in ["Field Audit in Progress", "Draft SAR sent to HQ", "SAR issued"]:
                             updated_field_dt = st.date_input("Actual Date of Completion of Field Audit", value=parse_saved_date_or_none("actual_date_field"))
                             
                     with ec2:
-                        if updated_status in ["Sent to HQs", "IR Issued"]:
+                        if updated_status in ["Draft SAR sent to HQ", "SAR issued"]:
                             updated_hq_dt = st.date_input("Actual Date of Sending Draft SAR to HQ", value=parse_saved_date_or_none("actual_date_hq"))
-                        if updated_status == "IR Issued":
+                        if updated_status == "SAR issued":
                             updated_issue_dt = st.date_input("Actual Date of Issue of SAR", value=parse_saved_date_or_none("actual_date_issue"))
                             
                 col_btn1, col_btn2 = st.columns([4, 1])
                 with col_btn1:
                     if st.form_submit_button("💾 Save Changes & Update Records"):
-                        # If a record is reset to Accounts Awaited, clear all stored milestone dates automatically
-                        if updated_status == "Accounts Awaited":
+                        if updated_status == "Accounts Not Received":
                             update_payload = {
                                 "cab": updated_cab,
                                 "date_of_receipt": None,
                                 "actual_date_field": None,
                                 "actual_date_hq": None,
                                 "actual_date_issue": None,
-                                "status": "Accounts Awaited"
+                                "status": "Accounts Not Received"
                             }
                         else:
                             update_payload = {
