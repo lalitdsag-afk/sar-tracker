@@ -56,7 +56,7 @@ CAB_OPTIONS = ["CSIR", "TDB", "RCB", "ANRF", "WII", "NTCA", "CAMPA", "CAQM", "CZ
 STATUS_OPTIONS = ["Accounts Not Received", "Field Audit in Progress", "Draft SAR sent to HQ", "SAR issued"]
 
 # --- APP LAYOUT ---
-st.set_page_config(page_title="SAR Tracking Management System", layout="wide")
+st.set_page_config(page_title="SAR Tracking Management System", layout="wide", initial_sidebar_state="collapsed")
 
 st.title("🛡️ Separate Audit Report (SAR) Tracking Portal")
 st.markdown("##### **DGA, CE (ESD) — Standalone Monitoring Engine**")
@@ -86,7 +86,13 @@ else:
         st.session_state["go_authenticated"] = False
         st.session_state["go_user"] = None
         st.rerun()
-
+def fmt_dt(d_str):
+    """Converts YYYY-MM-DD to DD-MM-YY"""
+    if not d_str: return ""
+    try:
+        return datetime.strptime(d_str, "%Y-%m-%d").strftime("%d-%m-%y")
+    except:
+        return d_str
 # --- RAW HTML SAR RENDERER ENGINE ---
 def render_sar_html_table(all_records):
     """Compiles an alphabetized clean HTML table for SAR tracking metrics without whitespace leaks"""
