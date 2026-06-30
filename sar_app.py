@@ -111,8 +111,8 @@ def render_sar_html_table(all_records):
         if receipt_dt_str and status_val != "Accounts Not Received":
             try:
                 base_dt = datetime.strptime(receipt_dt_str, "%Y-%m-%d")
-                t_field = (base_dt + timedelta(days=60)).strftime("%Y-%m-%d")
-                t_hq = (base_dt + timedelta(days=90)).strftime("%Y-%m-%d")
+                t_field = (base_dt + timedelta(days=45)).strftime("%Y-%m-%d")
+                t_hq = (base_dt + timedelta(days=67)).strftime("%Y-%m-%d")
                 t_issue = (base_dt + timedelta(days=120)).strftime("%Y-%m-%d")
                 receipt_display = receipt_dt_str
             except:
